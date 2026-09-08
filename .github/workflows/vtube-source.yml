@@ -8,51 +8,21 @@ on:
 jobs:
   extract:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install tools
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install --upgrade yt-dlp
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq ffmpeg
-
-      - name: Extract candidate windows from official VOD
+      - name: Download public mirrored candidate clips
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p candidates
-          URL="https://www.youtube.com/watch?v=N5CW6lmWho4"
-
-          cut_window() {
-            LABEL="$1"
-            START="$2"
-            END="$3"
-            echo "Extracting $LABEL: $START to $END"
-            yt-dlp --no-playlist --force-keyframes-at-cuts \
-              --download-sections "*${START}-${END}" \
-              -f "bv*[height<=720]+ba/b[height<=720]" \
-              --merge-output-format mp4 \
-              -o "candidates/${LABEL}.%(ext)s" "$URL" || \
-            yt-dlp --no-playlist --force-keyframes-at-cuts \
-              --download-sections "*${START}-${END}" \
-              -f "b[height<=720]/b" \
-              --merge-output-format mp4 \
-              -o "candidates/${LABEL}.%(ext)s" "$URL"
-          }
-
-          cut_window A_early_biboo_irys 00:05:00 00:09:00
-          cut_window B_sitting_bit 00:19:30 00:23:30
-          cut_window C_biboo_rap_attempt 01:08:30 01:12:30
-          cut_window D_late_rap_bit 01:39:30 01:42:30
-
-          yt-dlp --no-playlist --skip-download \
-            --write-auto-subs --sub-langs "en.*,en" --sub-format vtt \
-            -o "candidates/full.%(ext)s" "$URL" || true
-
-          ls -lh candidates
+          curl -L --fail --retry 2 -A "Mozilla/5.0" -e "https://boards.4chan.org/" -o candidates/A_biboo_scream.mp4 "https://i.4cdn.org/vt/1787491570177.mp4"
+          curl -L --fail --retry 2 -A "Mozilla/5.0" -e "https://boards.4chan.org/" -o candidates/B_spaghet_related.mp4 "https://i.4cdn.org/vt/1787492418449.mp4"
+          curl -L --fail --retry 2 -A "Mozilla/5.0" -e "https://boards.4chan.org/" -o candidates/C_kill_people_mori.mp4 "https://i.4cdn.org/vt/1787494576256.mp4"
+          curl -L --fail --retry 2 -A "Mozilla/5.0" -e "https://boards.4chan.org/" -o candidates/D_hello.mp4 "https://i.4cdn.org/vt/1787499313814.mp4"
+          curl -L --fail --retry 2 -A "Mozilla/5.0" -e "https://boards.4chan.org/" -o candidates/E_biboo_scream_23.mp4 "https://i.4cdn.org/vt/1787493454172.mp4"
+          for f in candidates/*; do file "$f"; done
 
       - name: Upload temporary source candidates
         uses: actions/upload-artifact@v4
