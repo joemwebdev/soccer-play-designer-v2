@@ -1,0 +1,64 @@
+name: VTube Reddit Mirror Extract
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve Reddit media
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python - <<'PY'
+          import json, urllib.request, re, html
+          urls=[
+            'https://www.reddit.com/r/Hololive/comments/1w8kvqf/if_they_see_punishments_as_rewards_how_do_you/.json?raw_json=1',
+            'https://old.reddit.com/r/Hololive/comments/1w8kvqf/if_they_see_punishments_as_rewards_how_do_you/.json?raw_json=1'
+          ]
+          data=None
+          for u in urls:
+            try:
+              req=urllib.request.Request(u,headers={'User-Agent':'Mozilla/5.0 VTubeContext/1.0'})
+              with urllib.request.urlopen(req,timeout=30) as r:
+                raw=r.read()
+              print('GOT',u,len(raw))
+              open('out/reddit.json','wb').write(raw)
+              data=json.loads(raw)
+              break
+            except Exception as e:
+              print('FAIL',u,repr(e))
+          if data is None: raise SystemExit(2)
+          post=data[0]['data']['children'][0]['data']
+          open('out/post-meta.json','w').write(json.dumps({k:post.get(k) for k in ['title','url','domain','is_video','permalink']},indent=2))
+          rv=post.get('secure_media',{}).get('reddit_video',{}) or post.get('media',{}).get('reddit_video',{})
+          print('REDDIT_VIDEO',json.dumps(rv,indent=2))
+          fallback=rv.get('fallback_url')
+          if fallback:
+            fallback=html.unescape(fallback)
+            open('out/fallback.txt','w').write(fallback)
+            req=urllib.request.Request(fallback,headers={'User-Agent':'Mozilla/5.0'})
+            with urllib.request.urlopen(req,timeout=60) as r, open('out/moment1.mp4','wb') as f:
+              while True:
+                b=r.read(1024*1024)
+                if not b: break
+                f.write(b)
+            print('DOWNLOADED',fallback)
+          else:
+            print('NO FALLBACK')
+          PY
+          ls -lh out
+      - name: Upload mirror
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reddit-moment
+          path: out/
+          retention-days: 1
+          compression-level: 0
