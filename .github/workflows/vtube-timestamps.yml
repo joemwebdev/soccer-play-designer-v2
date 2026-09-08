@@ -1,0 +1,48 @@
+name: VTube Timestamp Pass
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  timestamps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download extracted candidate artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p work out
+          curl -L --fail --retry 3 \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/joemwebdev/soccer-play-designer-v2/actions/artifacts/10039602273/zip \
+            -o work/candidates.zip
+          unzip -q work/candidates.zip -d work/candidates
+          ls -lh work/candidates/{A,E,F}.mp4
+      - name: Install Whisper
+        run: |
+          python -m pip install -q openai-whisper
+      - name: Timestamp A E F
+        run: |
+          set -euo pipefail
+          for b in A E F; do
+            whisper "work/candidates/${b}.mp4" \
+              --model tiny.en --language en --task transcribe \
+              --output_format srt --output_dir out --fp16 False >/dev/null 2>&1
+          done
+          for f in out/*.srt; do echo "===== $f ====="; cat "$f"; done
+      - name: Upload timestamps
+        uses: actions/upload-artifact@v4
+        with:
+          name: vtube-timestamps
+          path: out/
+          retention-days: 1
