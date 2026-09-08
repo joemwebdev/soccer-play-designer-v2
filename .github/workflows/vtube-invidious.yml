@@ -1,0 +1,85 @@
+name: VTube Invidious Extract
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ffmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+      - name: Resolve via public Invidious APIs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python - <<'PY'
+          import urllib.request,json,ssl,sys
+          vid='N5CW6lmWho4'
+          bases=['https://inv.nadeko.net','https://invidious.nerdvpn.de','https://yt.chocolatemoo53.com','https://invidious.tiekoetter.com']
+          ctx=ssl.create_default_context()
+          data=None
+          for base in bases:
+            for local in (False,True):
+              u=f'{base}/api/v1/videos/{vid}?local={str(local).lower()}'
+              try:
+                req=urllib.request.Request(u,headers={'User-Agent':'Mozilla/5.0'})
+                with urllib.request.urlopen(req,timeout=20,context=ctx) as r: raw=r.read()
+                j=json.loads(raw)
+                fs=j.get('formatStreams',[]) or j.get('adaptiveFormats',[])
+                print('API',base,'local',local,'status OK','formats',len(fs),'title',j.get('title'))
+                if fs:
+                  data=j; open('out/invidious.json','wb').write(raw); break
+              except Exception as e: print('FAIL',base,local,repr(e))
+            if data: break
+          if not data: raise SystemExit(2)
+          # prefer progressive format with audio, highest <=720p
+          streams=data.get('formatStreams',[])
+          def qnum(x):
+            q=str(x.get('qualityLabel') or x.get('quality') or '0')
+            import re
+            m=re.search(r'(\d+)',q); return int(m.group(1)) if m else 0
+          cand=[x for x in streams if x.get('url') and qnum(x)<=720]
+          if not cand: cand=[x for x in streams if x.get('url')]
+          cand=sorted(cand,key=qnum,reverse=True)
+          if cand:
+            open('out/progressive_url.txt','w').write(cand[0]['url'])
+            print('PROGRESSIVE',cand[0].get('qualityLabel'),cand[0].get('container'),cand[0]['url'][:300])
+          else:
+            ad=data.get('adaptiveFormats',[])
+            vids=[x for x in ad if x.get('url') and str(x.get('type','')).startswith('video') and qnum(x)<=720]
+            aud=[x for x in ad if x.get('url') and str(x.get('type','')).startswith('audio')]
+            vids=sorted(vids,key=qnum,reverse=True)
+            aud=sorted(aud,key=lambda x:int(x.get('bitrate') or 0),reverse=True)
+            open('out/video_url.txt','w').write(vids[0]['url'] if vids else '')
+            open('out/audio_url.txt','w').write(aud[0]['url'] if aud else '')
+            print('ADAPTIVE VIDEO', vids[0].get('qualityLabel') if vids else None)
+            print('ADAPTIVE AUDIO', aud[0].get('bitrate') if aud else None)
+          PY
+          if [ -s out/progressive_url.txt ]; then
+            U=$(cat out/progressive_url.txt)
+            ffmpeg -y -ss 5330 -i "$U" -t 55 -c:v libx264 -preset veryfast -crf 20 -c:a aac -b:a 160k out/moment.mp4
+          else
+            V=$(cat out/video_url.txt || true); A=$(cat out/audio_url.txt || true)
+            test -n "$V"
+            if [ -n "$A" ]; then
+              ffmpeg -y -ss 5330 -i "$V" -ss 5330 -i "$A" -t 55 -map 0:v:0 -map 1:a:0 -c:v libx264 -preset veryfast -crf 20 -c:a aac -b:a 160k out/moment.mp4
+            else
+              ffmpeg -y -ss 5330 -i "$V" -t 55 -c:v libx264 -preset veryfast -crf 20 out/moment.mp4
+            fi
+          fi
+          ffprobe -v error -show_entries format=duration,size -of json out/moment.mp4
+          ls -lh out
+      - name: Upload extracted moment
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: invidious-moment
+          path: out/
+          retention-days: 1
+          compression-level: 0
