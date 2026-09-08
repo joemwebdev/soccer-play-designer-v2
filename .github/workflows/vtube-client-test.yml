@@ -1,0 +1,39 @@
+name: VTube YouTube Client Test
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install yt-dlp
+        run: python -m pip install --upgrade yt-dlp
+      - name: Test alternate YouTube player clients
+        shell: bash
+        run: |
+          set +e
+          URL='https://www.youtube.com/watch?v=N5CW6lmWho4'
+          for client in web_safari tv tv_embedded android_vr web_creator mweb ios; do
+            echo "===== CLIENT $client ====="
+            yt-dlp --js-runtimes node --extractor-args "youtube:player_client=$client" --no-playlist --list-formats "$URL" 2>&1 | tee "${client}.log"
+            if grep -qE '^([0-9]{2,}|[a-zA-Z0-9_-]+)[[:space:]]' "${client}.log"; then
+              echo "$client" > working_client.txt
+              break
+            fi
+          done
+          echo 'WORKING:'; cat working_client.txt 2>/dev/null || true
+          test -s working_client.txt
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: youtube-client-test
+          path: |
+            *.log
+            working_client.txt
+          retention-days: 1
