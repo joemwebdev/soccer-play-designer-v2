@@ -1,0 +1,35 @@
+name: VTube Ragtag Extract
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Query Ragtag and extract source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python - <<'PY'
+          import json, urllib.request, sys
+          vid='N5CW6lmWho4'
+          url=f'https://archive.ragtag.moe/api/v1/search?v={vid}'
+          print('QUERY', url)
+          with urllib.request.urlopen(url, timeout=30) as r:
+              raw=r.read()
+          open('out/ragtag.json','wb').write(raw)
+          print(raw[:12000].decode('utf-8','replace'))
+          PY
+      - name: Upload query result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ragtag-query
+          path: out/
+          retention-days: 1
