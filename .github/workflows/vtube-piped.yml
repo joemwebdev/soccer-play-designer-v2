@@ -1,0 +1,66 @@
+name: VTube Piped Extract
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ffmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+      - name: Resolve via public Piped APIs and extract moment
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python - <<'PY'
+          import urllib.request,json,html,sys
+          vid='N5CW6lmWho4'
+          apis=['https://pipedapi.kavin.rocks','https://pipedapi.tokhmi.xyz','https://pipedapi.moomoo.me','https://pipedapi.syncpundit.io','https://api-piped.mha.fi','https://piped-api.garudalinux.org','https://pipedapi.rivo.lol','https://pipedapi.leptons.xyz','https://pipedapi.12a.app','https://api.piped.minionflo.net']
+          data=None; chosen=None
+          for base in apis:
+            u=f'{base}/streams/{vid}'
+            try:
+              req=urllib.request.Request(u,headers={'User-Agent':'Mozilla/5.0'})
+              with urllib.request.urlopen(req,timeout=15) as r: raw=r.read()
+              j=json.loads(raw)
+              if j.get('videoStreams'):
+                data=j; chosen=base
+                open('out/piped.json','wb').write(raw)
+                print('SUCCESS API',base,'video streams',len(j.get('videoStreams',[])),'audio',len(j.get('audioStreams',[])))
+                break
+            except Exception as e: print('FAIL',base,repr(e))
+          if not data: raise SystemExit(2)
+          vids=[x for x in data.get('videoStreams',[]) if x.get('url') and not x.get('videoOnly')]
+          if not vids: vids=[x for x in data.get('videoStreams',[]) if x.get('url')]
+          vids=sorted(vids,key=lambda x:(x.get('height') or 0,x.get('bitrate') or 0),reverse=True)
+          aud=sorted([x for x in data.get('audioStreams',[]) if x.get('url')],key=lambda x:x.get('bitrate') or 0,reverse=True)
+          print('VIDEO CANDIDATE',json.dumps(vids[:2],indent=2)[:5000])
+          print('AUDIO CANDIDATE',json.dumps(aud[:2],indent=2)[:3000])
+          open('out/video_url.txt','w').write(vids[0]['url'] if vids else '')
+          open('out/audio_url.txt','w').write(aud[0]['url'] if aud else '')
+          PY
+          V=$(cat out/video_url.txt)
+          A=$(cat out/audio_url.txt)
+          if [ -z "$V" ]; then exit 3; fi
+          # strongest verified moment begins at 1:28:53, capture a generous 50s window
+          if [ -n "$A" ]; then
+            ffmpeg -y -ss 5330 -i "$V" -ss 5330 -i "$A" -t 55 -map 0:v:0 -map 1:a:0 -c:v libx264 -preset veryfast -crf 20 -c:a aac -b:a 160k out/moment.mp4
+          else
+            ffmpeg -y -ss 5330 -i "$V" -t 55 -c:v libx264 -preset veryfast -crf 20 -c:a aac out/moment.mp4
+          fi
+          ffprobe -v error -show_entries format=duration,size -of json out/moment.mp4
+          ls -lh out
+      - name: Upload extracted moment
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: piped-moment
+          path: out/
+          retention-days: 1
+          compression-level: 0
