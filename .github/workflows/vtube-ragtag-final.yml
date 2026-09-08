@@ -1,0 +1,122 @@
+name: VTube Ragtag Final Extract
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          python -m pip install --upgrade pip
+          python -m pip install beautifulsoup4
+
+      - name: Resolve archived media URL
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python - <<'PY'
+          import urllib.request, json, re, html
+          vid='5kzu8bfpc0E'
+          page=f'https://archive.ragtag.moe/watch?v={vid}'
+          req=urllib.request.Request(page,headers={'User-Agent':'Mozilla/5.0'})
+          with urllib.request.urlopen(req,timeout=30) as r:
+              raw=r.read().decode('utf-8','replace')
+          open('out/watch.html','w').write(raw)
+          candidates=[]
+          # Direct URLs serialized in the page
+          for m in re.findall(r'https[^"\\\s]+?\.webm(?:\?[^"\\\s<]+)?',raw):
+              candidates.append(html.unescape(m).replace('\\u0026','&'))
+          # Parse __NEXT_DATA__ recursively
+          from bs4 import BeautifulSoup
+          soup=BeautifulSoup(raw,'html.parser')
+          script=soup.find('script',id='__NEXT_DATA__')
+          if script:
+              try:
+                  data=json.loads(script.string)
+                  def walk(x):
+                      if isinstance(x,dict):
+                          for v in x.values(): walk(v)
+                      elif isinstance(x,list):
+                          for v in x: walk(v)
+                      elif isinstance(x,str) and '.webm' in x and x.startswith('http'):
+                          candidates.append(x)
+                  walk(data)
+                  open('out/nextdata.json','w').write(json.dumps(data))
+              except Exception as e: print('NEXT_PARSE_FAIL',repr(e))
+          # Guessed unsiged fallback from Ragtag source code
+          candidates.append('https://content.archive.ragtag.moe/s3:archive-staging/archive-202607/5kzu8bfpc0E/5kzu8bfpc0E.webm')
+          # dedupe and prioritize source file
+          ded=[]
+          for u in candidates:
+              if '5kzu8bfpc0E.webm' in u and u not in ded: ded.append(u)
+          print('CANDIDATES',len(ded))
+          for i,u in enumerate(ded): print(i,u[:1000])
+          open('out/media_candidates.txt','w').write('\n'.join(ded))
+          if not ded: raise SystemExit(2)
+          PY
+
+      - name: Probe and extract candidate windows
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL=''
+          while IFS= read -r U; do
+            echo "PROBING ${U:0:200}"
+            if ffprobe -v error -rw_timeout 20000000 -show_entries format=duration -of default=nk=1:nw=1 "$U" > out/probe.txt 2>out/probe.err; then
+              URL="$U"; break
+            fi
+          done < out/media_candidates.txt
+          if [ -z "$URL" ]; then
+            echo 'NO WORKING MEDIA URL'; cat out/probe.err || true; exit 3
+          fi
+          printf '%s' "$URL" > out/working_url.txt
+          echo "WORKING URL: ${URL:0:200}"
+
+          extract() {
+            label="$1"; start="$2"; dur="$3"
+            echo "EXTRACT $label @ $start"
+            ffmpeg -y -loglevel warning -rw_timeout 30000000 -ss "$start" -i "$URL" -t "$dur" \
+              -map 0:v:0 -map 0:a:0? -vf 'scale=-2:720' -r 30 \
+              -c:v libx264 -preset veryfast -crf 22 -c:a aac -b:a 128k -movflags +faststart "out/${label}.mp4"
+            ffmpeg -y -loglevel error -i "out/${label}.mp4" -vf 'fps=1/8,scale=480:-1,tile=5x1' -frames:v 1 "out/${label}_contact.jpg" || true
+          }
+
+          extract A 00:11:30 100
+          extract B 00:19:00 100
+          extract C 00:27:30 100
+          extract D 01:00:30 100
+          extract E 01:09:00 100
+          extract F 01:19:30 150
+          ls -lh out/*.mp4 out/*_contact.jpg
+
+      - name: Transcribe candidate audio with Whisper
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -q openai-whisper
+          mkdir -p out/transcripts
+          for f in out/[A-F].mp4; do
+            b=$(basename "$f" .mp4)
+            echo "TRANSCRIBING $b"
+            whisper "$f" --model tiny.en --language en --task transcribe --output_format txt --output_dir out/transcripts --fp16 False >/dev/null 2>&1 || true
+          done
+          for f in out/transcripts/*.txt; do echo "===== $f ====="; cat "$f"; done
+
+      - name: Upload candidate package
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vtube-ragtag-candidates
+          path: out/
+          retention-days: 1
+          compression-level: 0
