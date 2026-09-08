@@ -1,0 +1,63 @@
+name: VTube source extract
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --upgrade yt-dlp
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+
+      - name: Extract candidate windows from official VOD
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p candidates
+          URL="https://www.youtube.com/watch?v=N5CW6lmWho4"
+
+          cut_window() {
+            LABEL="$1"
+            START="$2"
+            END="$3"
+            echo "Extracting $LABEL: $START to $END"
+            yt-dlp --no-playlist --force-keyframes-at-cuts \
+              --download-sections "*${START}-${END}" \
+              -f "bv*[height<=720]+ba/b[height<=720]" \
+              --merge-output-format mp4 \
+              -o "candidates/${LABEL}.%(ext)s" "$URL" || \
+            yt-dlp --no-playlist --force-keyframes-at-cuts \
+              --download-sections "*${START}-${END}" \
+              -f "b[height<=720]/b" \
+              --merge-output-format mp4 \
+              -o "candidates/${LABEL}.%(ext)s" "$URL"
+          }
+
+          cut_window A_early_biboo_irys 00:05:00 00:09:00
+          cut_window B_sitting_bit 00:19:30 00:23:30
+          cut_window C_biboo_rap_attempt 01:08:30 01:12:30
+          cut_window D_late_rap_bit 01:39:30 01:42:30
+
+          yt-dlp --no-playlist --skip-download \
+            --write-auto-subs --sub-langs "en.*,en" --sub-format vtt \
+            -o "candidates/full.%(ext)s" "$URL" || true
+
+          ls -lh candidates
+
+      - name: Upload temporary source candidates
+        uses: actions/upload-artifact@v4
+        with:
+          name: vtube-source-candidates
+          path: candidates/
+          retention-days: 1
+          compression-level: 0
