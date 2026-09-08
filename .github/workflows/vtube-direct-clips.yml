@@ -1,0 +1,29 @@
+name: VTube Direct Clip Pull
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  pull:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download public clip mirrors
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p clips
+          curl -fL --retry 2 -A 'Mozilla/5.0' 'https://i.4cdn.org/vt/1788660499049984.mp4' -o clips/clip_a.mp4
+          curl -fL --retry 2 -A 'Mozilla/5.0' 'https://i.4cdn.org/vt/1788659259831574.mp4' -o clips/clip_b.mp4
+          curl -fL --retry 2 -A 'Mozilla/5.0' 'https://i.4cdn.org/vt/1788662923890218.mp4' -o clips/clip_c.mp4
+          ls -lh clips
+      - name: Upload clips
+        uses: actions/upload-artifact@v4
+        with:
+          name: vtube-direct-clips
+          path: clips/
+          retention-days: 1
+          compression-level: 0
