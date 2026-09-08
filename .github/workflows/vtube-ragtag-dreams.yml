@@ -1,0 +1,37 @@
+name: VTube Ragtag Dreams Source
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch Ragtag archive metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python - <<'PY'
+          import urllib.request
+          vid='5kzu8bfpc0E'
+          urls=[f'https://archive.ragtag.moe/api/v1/search?v={vid}', f'https://archive.ragtag.moe/api/v1/videos/{vid}']
+          for i,u in enumerate(urls):
+            try:
+              req=urllib.request.Request(u,headers={'User-Agent':'Mozilla/5.0'})
+              with urllib.request.urlopen(req,timeout=30) as r: raw=r.read()
+              open(f'out/response{i}.json','wb').write(raw)
+              print('\nURL',u,'\n',raw[:20000].decode('utf-8','replace'))
+            except Exception as e: print('FAIL',u,repr(e))
+          PY
+      - name: Upload metadata
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ragtag-dreams-meta
+          path: out/
+          retention-days: 1
