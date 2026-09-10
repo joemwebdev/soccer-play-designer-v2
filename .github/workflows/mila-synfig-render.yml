@@ -26,6 +26,19 @@ jobs:
       - name: Generate Synfig project
         run: |
           python3 mila-animation/generate_mila_sif.py
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          path = 'mila-animation/mila_poc.sif'
+          tree = ET.parse(path)
+          root = tree.getroot()
+          layers = [child for child in list(root) if child.tag == 'layer']
+          for layer in layers:
+              root.remove(layer)
+          for layer in reversed(layers):
+              root.append(layer)
+          tree.write(path, encoding='utf-8', xml_declaration=True)
+          print(f'Reversed {len(layers)} Synfig layers')
+          PY
           test -s mila-animation/mila_poc.sif
 
       - name: Render PNG sequence
