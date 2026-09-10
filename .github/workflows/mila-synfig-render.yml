@@ -28,11 +28,6 @@ jobs:
           python3 mila-animation/generate_mila_sif.py
           test -s mila-animation/mila_poc.sif
 
-      - name: Inspect Synfig
-        run: |
-          synfig --version
-          synfig --help | head -40 || true
-
       - name: Render PNG sequence
         run: |
           mkdir -p mila-animation/render
