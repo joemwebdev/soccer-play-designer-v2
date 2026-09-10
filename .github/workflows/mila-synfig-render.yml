@@ -31,7 +31,7 @@ jobs:
       - name: Inspect Synfig
         run: |
           synfig --version
-          synfig --targets
+          synfig --help | head -40 || true
 
       - name: Render PNG sequence
         run: |
