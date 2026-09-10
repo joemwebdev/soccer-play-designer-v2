@@ -1,0 +1,55 @@
+name: Render MILA Synfig POC
+
+on:
+  push:
+    branches:
+      - mila-animation-runner
+    paths:
+      - 'mila-animation/**'
+      - '.github/workflows/mila-synfig-render.yml'
+  workflow_dispatch:
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+
+      - name: Install Synfig and FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y synfig ffmpeg python3
+
+      - name: Generate Synfig project
+        run: |
+          python3 mila-animation/generate_mila_sif.py
+          test -s mila-animation/mila_poc.sif
+
+      - name: Inspect Synfig
+        run: |
+          synfig --version
+          synfig --targets
+
+      - name: Render PNG sequence
+        run: |
+          mkdir -p mila-animation/render
+          synfig mila-animation/mila_poc.sif -t png -w 1080 -h 1920 -o mila-animation/render/frame.png
+          ls -lh mila-animation/render | head
+
+      - name: Encode upload-ready MP4
+        run: |
+          ffmpeg -y -framerate 30 -i mila-animation/render/frame.%04d.png \
+            -c:v libx264 -preset medium -crf 18 -pix_fmt yuv420p \
+            -movflags +faststart mila-animation/MILA_Synfig_POC.mp4
+          ffprobe -v error -show_entries format=duration,size -show_entries stream=codec_name,width,height,r_frame_rate -of json mila-animation/MILA_Synfig_POC.mp4
+
+      - name: Upload rendered video
+        uses: actions/upload-artifact@v4
+        with:
+          name: MILA-Synfig-POC
+          path: mila-animation/MILA_Synfig_POC.mp4
+          if-no-files-found: error
+          retention-days: 7
